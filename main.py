@@ -3,13 +3,18 @@ from pydantic import BaseModel
 import requests
 import os
 from dotenv import load_dotenv
-
+from fastapi.middleware.cors import CORSMiddleware
 # Load API key
 load_dotenv()
 API_KEY = os.getenv("GOOGLE_FACT_CLAIM_KEY")
 
 app = FastAPI()
-
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # or your extension origin
+    allow_methods=["*"],
+    allow_headers=["*"]
+)
 class Claim(BaseModel):
     text: str
 
