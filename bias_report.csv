@@ -1,0 +1,5 @@
+Paragraph,Text,Sentiment,Entities,Framing Words,Bias Hint
+1,Apple released a new product.,0.0,Apple,new,Neutral
+2,Samsung criticized the launch as disappointing.,-0.6908,Samsung,disappointing,Negative tone
+3,Experts say Apple’s innovation could change the market.,0.3818,Apple,,Positive tone
+4,Critics argue Samsung’s response was weak.,-0.7579,Samsung,weak,Negative tone
