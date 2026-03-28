@@ -1,5 +1,5 @@
-Sentence,Text,Sentiment,Entities,Framing Words,Bias Hint,Exaggeration Score,Exaggeration Flags
-1,Apple released a new product.,0.916,Apple,new,Positive tone,48.2,None
-2,Samsung criticized the launch as disappointing.,-0.889,Samsung,disappointing,Negative tone,96.2,Likely exaggerated (96.2%)
-3,Experts say Apple’s innovation could change the market.,0.879,Apple,,Positive tone,82.6,Likely exaggerated (82.6%)
-4,Critics argue Samsung’s response was weak.,-0.665,Samsung,weak,Negative tone,97.5,Likely exaggerated (97.5%)
+Sentence,Text,Sentiment,Entities,Framing Words,Bias Hint
+1,Apple released a new product.,0.916,Apple,new,Positive tone
+2,Samsung criticized the launch as disappointing.,-0.889,Samsung,disappointing,Negative tone
+3,Experts say Apple's innovation could change the market.,0.88,Apple,,Positive tone
+4,Critics argue Samsung's response was weak.,-0.72,Samsung,weak,Negative tone

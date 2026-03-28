@@ -1,12 +1,16 @@
 import nltk
-from nltk.sentiment import SentimentIntensityAnalyzer
 import spacy
 import pandas as pd
 from collections import Counter, defaultdict
 from transformers import pipeline
 import re
-
-nltk.download('vader_lexicon')
+import logging
+logging.disable(logging.WARNING)
+import os
+import warnings
+warnings.filterwarnings("ignore")
+os.environ["TRANSFORMERS_VERBOSITY"] = "error"
+os.environ["HF_HUB_DISABLE_IMPLICIT_TOKEN"] = "1"
 
 # Load transformer sentiment model
 stance_model = pipeline(
@@ -16,12 +20,6 @@ stance_model = pipeline(
 
 # Load spaCy model
 nlp = spacy.load("en_core_web_sm")
-
-# Load exaggeration model
-exaggeration_model = pipeline(
-    "zero-shot-classification",
-    model="cross-encoder/nli-deberta-v3-small"
-)
 
 ignore_words = ["said", "says", "according", "reported"]
 weak_threshold = 0.1
@@ -59,17 +57,7 @@ def analyze_bias(article):
 
         # Batch sentiment
         batch_results = stance_model(texts, batch_size=16, truncation=True)
-
-        # Batch exaggeration — descriptive labels for better NLI signal
-        exag_results = exaggeration_model(
-            clauses_only,
-            candidate_labels=[
-                "This is an exaggerated or sensationalist claim",
-                "This is a measured factual statement"
-            ],
-            batch_size=16
-        )
-
+        
         # --- Pass 3: combine results ---
         results = []
         entity_sentiment = defaultdict(list)
@@ -97,17 +85,6 @@ def analyze_bias(article):
             words = [t.text.lower() for t in clause_doc if t.pos_ in ['ADJ', 'ADV']]
             top_words = [w for w, _ in Counter(words).most_common(3)]
 
-            # Exaggeration from batch
-            exag_result = exag_results[i]
-            exag_index = exag_result['labels'].index("This is an exaggerated or sensationalist claim")
-            exag_confidence = exag_result['scores'][exag_index]
-            exag_score = round(exag_confidence * 100, 1)
-            exag_flags = (
-                f"Likely exaggerated ({exag_score}%)" if exag_confidence > 0.75 else
-                f"Possibly exaggerated ({exag_score}%)" if exag_confidence > 0.55 else
-                "None"
-            )
-
             results.append({
                 "Sentence": sent_num,
                 "Text": clause,
@@ -115,8 +92,6 @@ def analyze_bias(article):
                 "Entities": ", ".join(entities),
                 "Framing Words": ", ".join(top_words),
                 "Bias Hint": bias_hint,
-                "Exaggeration Score": exag_score,
-                "Exaggeration Flags": exag_flags
             })
 
         df = pd.DataFrame(results)
