@@ -17,81 +17,116 @@ stance_model = pipeline(
 # Load spaCy model
 nlp = spacy.load("en_core_web_sm")
 
+# Load exaggeration model
+exaggeration_model = pipeline(
+    "zero-shot-classification",
+    model="cross-encoder/nli-deberta-v3-small"
+)
+
 ignore_words = ["said", "says", "according", "reported"]
-weak_threshold = 0.1  # Lower threshold to catch subtle sentiment
+weak_threshold = 0.1
+
 
 def analyze_bias(article):
-    doc = nlp(article)
-    results = []
-    entity_sentiment = defaultdict(list)
+    try:
+        doc = nlp(article)
+        clause_split_pattern = re.compile(r'\b(?:but|whereas|however|although|while)\b', re.IGNORECASE)
 
-    # Split sentence into clauses for better entity-level scoring
-    clause_split_pattern = re.compile(r'\b(?:but|whereas|however|although|while)\b', re.IGNORECASE)
+        # --- Pass 1: collect clauses ---
+        clause_data = []
+        for i, sent in enumerate(doc.sents):
+            for clause in clause_split_pattern.split(sent.text.strip()):
+                clause = clause.strip()
+                if not clause or len(clause.split()) < 2:
+                    continue
+                text_for_sentiment = " ".join(
+                    [w for w in clause.split() if w.lower() not in ignore_words]
+                )
+                clause_data.append((i + 1, clause, text_for_sentiment))
 
-    for i, sent in enumerate(doc.sents):
-        sentence_text = sent.text.strip()
+        if not clause_data:
+            print("Warning: no clauses found")
+            return pd.DataFrame(), {}, 0
 
-        # Split sentence into clauses
-        clauses = clause_split_pattern.split(sentence_text)
+        # --- Pass 2: batch ALL models together ---
+        texts = [cd[2] for cd in clause_data]
+        clauses_only = [cd[1] for cd in clause_data]
 
-        for clause in clauses:
-            clause = clause.strip()
-            if not clause:
-                continue
+        # Batch spaCy
+        active_pipes = nlp.pipe_names
+        to_disable = [p for p in ["lemmatizer", "textcat"] if p in active_pipes]
+        clause_docs = list(nlp.pipe(clauses_only, batch_size=32, disable=to_disable))
 
-            # Remove reporting verbs
-            text_for_sentiment = " ".join(
-                [word for word in clause.split() if word.lower() not in ignore_words]
-            )
+        # Batch sentiment
+        batch_results = stance_model(texts, batch_size=16, truncation=True)
 
-            # Transformer sentiment
-            result = stance_model(text_for_sentiment)[0]
+        # Batch exaggeration — descriptive labels for better NLI signal
+        exag_results = exaggeration_model(
+            clauses_only,
+            candidate_labels=[
+                "This is an exaggerated or sensationalist claim",
+                "This is a measured factual statement"
+            ],
+            batch_size=16
+        )
+
+        # --- Pass 3: combine results ---
+        results = []
+        entity_sentiment = defaultdict(list)
+        label_map = {"LABEL_0": -1, "LABEL_1": 0, "LABEL_2": 1}
+
+        for i, ((sent_num, clause, _), result, clause_doc) in enumerate(
+            zip(clause_data, batch_results, clause_docs)
+        ):
+            # Sentiment
             label = result['label']
             score = result['score']
-
-            # Map label to numeric sentiment (-1 to 1)
-            label_map = {"LABEL_0": -1, "LABEL_1": 0, "LABEL_2": 1}  # Negative, Neutral, Positive
             sentiment = label_map.get(label, 0) * score
 
-            # Bias hint
-            if abs(sentiment) < weak_threshold:
-                bias_hint = "Neutral / weak sentiment"
-            else:
-                bias_hint = "Positive tone" if sentiment > 0 else "Negative tone"
+            bias_hint = "Neutral / weak sentiment" if abs(sentiment) < weak_threshold else (
+                "Positive tone" if sentiment > 0 else "Negative tone"
+            )
 
-            # Process entities in clause
-            clause_doc = nlp(clause)
+            # Entities
             entities = [ent.text for ent in clause_doc.ents if ent.label_ in ["ORG", "PERSON"]]
-
-            # Assign entity-level sentiment if strong enough
             if abs(sentiment) >= weak_threshold:
                 for ent in entities:
                     entity_sentiment[ent].append(sentiment)
 
             # Framing words
-            words = [token.text.lower() for token in clause_doc if token.pos_ in ['ADJ', 'ADV']]
-            freq = Counter(words)
-            top_words = [w for w, _ in freq.most_common(3)]
+            words = [t.text.lower() for t in clause_doc if t.pos_ in ['ADJ', 'ADV']]
+            top_words = [w for w, _ in Counter(words).most_common(3)]
+
+            # Exaggeration from batch
+            exag_result = exag_results[i]
+            exag_index = exag_result['labels'].index("This is an exaggerated or sensationalist claim")
+            exag_confidence = exag_result['scores'][exag_index]
+            exag_score = round(exag_confidence * 100, 1)
+            exag_flags = (
+                f"Likely exaggerated ({exag_score}%)" if exag_confidence > 0.75 else
+                f"Possibly exaggerated ({exag_score}%)" if exag_confidence > 0.55 else
+                "None"
+            )
 
             results.append({
-                "Sentence": i + 1,
+                "Sentence": sent_num,
                 "Text": clause,
                 "Sentiment": round(sentiment, 3),
                 "Entities": ", ".join(entities),
                 "Framing Words": ", ".join(top_words),
-                "Bias Hint": bias_hint
+                "Bias Hint": bias_hint,
+                "Exaggeration Score": exag_score,
+                "Exaggeration Flags": exag_flags
             })
 
-    df = pd.DataFrame(results)
+        df = pd.DataFrame(results)
+        entity_scores = {e: sum(s)/len(s) for e, s in entity_sentiment.items()}
+        bias_score = round((max(entity_scores.values()) - min(entity_scores.values())) * 50, 2) \
+            if len(entity_scores) >= 2 else 0
 
-    # Entity sentiment scores
-    entity_scores = {ent: sum(scores)/len(scores) for ent, scores in entity_sentiment.items()}
+        return df, entity_scores, bias_score
 
-    # Overall bias score (0–100)
-    if len(entity_scores) >= 2:
-        values = list(entity_scores.values())
-        bias_score = (max(values) - min(values)) * 50
-    else:
-        bias_score = 0
-
-    return df, entity_scores, round(bias_score, 2)
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return pd.DataFrame(), {}, 0
