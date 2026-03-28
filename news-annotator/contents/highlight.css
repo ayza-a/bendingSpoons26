@@ -1,0 +1,14 @@
+.highlight-false {
+  background-color: rgba(255, 80, 80, 0.4);
+  border-bottom: 2px solid red;
+}
+
+.highlight-true {
+  background-color: rgba(80, 200, 80, 0.4);
+  border-bottom: 2px solid green;
+}
+
+.highlight-mixed {
+  background-color: rgba(255, 200, 50, 0.4);
+  border-bottom: 2px solid orange;
+}
