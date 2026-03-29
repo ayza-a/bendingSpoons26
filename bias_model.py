@@ -105,3 +105,31 @@ def analyze_bias(article):
         import traceback
         traceback.print_exc()
         return pd.DataFrame(), {}, 0
+
+
+# adding a FASTAPI endpoint to connect it
+
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+
+app = FastAPI()
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+class Article(BaseModel):
+    text: str
+
+@app.post("/analyze-bias")
+def analyze_bias_endpoint(article: Article):
+    df, entity_scores, bias_score = analyze_bias(article.text)
+    return {
+        "bias_score": bias_score,
+        "entity_scores": entity_scores,
+        "results": df.to_dict(orient="records")
+    }
